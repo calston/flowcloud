@@ -46,6 +46,9 @@ class Sflow(object):
 
         self.decode_samples(u)
 
+        # Sort samples by sequence number
+        self.samples.sort(key=lambda x: x.sequence)
+
     def decode_samples(self, u):
         self.samples = []
         
@@ -157,7 +160,7 @@ class CounterSample(object):
 
         self.record_count = u.unpack_uint()
 
-        self.interface_counters = []
+        self.counters = {}
 
         self.decoders = {
             1: InterfaceCounters,
@@ -170,17 +173,78 @@ class CounterSample(object):
         for i in range(self.record_count):
             counter_format = u.unpack_uint()
             counter_size = u.unpack_uint()
-            self.interface_counters.append(self.decoders[counter_format](u))
+            self.counters[counter_format] = self.decoders[counter_format](u)
+
+class ISO8023Header(object):
+    def __init__(self, u):
+        # Ethernet Frame
+        self.dst_mac = u.unpack_fstring(6)
+        self.src_mac = u.unpack_fstring(6)
+        self.typelen = u.unpack_uhyper()
+
+
+        if self.typelen == 0x8100:
+            d = u.unpack_uhyper()
+            self.vlan = d & 0x0fff
+            self.vlan_priority = d >> 13
+        else:
+            self.vlan = None
+        
+        if self.typelen == 0x0800:
+            b = ord(u.unpack_fopaque(1))
+            ver = b >> 4
+
+            self.decodeIPv4(u)
+
+        self.typelen = u.unpack_uhyper()
+
+    def decodeIPv4(self, u):
+        self.ip_dsf = ord(u.unpack_fopaque(1))
+        self.ip_length = u.unpack_uhyper()
+        self.ip_id = u.unpack_uhyper()
+        self.ip_flags = u.unpack_uhyper()
+        self.ip_ttl = ord(u.unpack_fopaque(1))
+        self.ip_proto = ord(u.unpack_fopaque(1))
+        self.ip_checksum = u.unpack_uhyper()
+
+        self.ip_src = u.unpack_uint()
+        self.ip_dst = u.unpack_uint()
+        
+        # Try get some TCP info...
+        self.ip_sport = u.unpack_uhyper()
+        self.ip_dport = u.unpack_uhyper()
+
+class IPv4Header(object):
+    def __init__(self, u):
+        pass
+        
+class IPv6Header(object):
+    def __init__(self, u):
+        pass
+
+class IEEE80211MACHeader(object):
+    def __init__(self, u):
+        pass
+
+class PPPHeader(object):
+    def __init__(self, u):
+        pass
 
 class HeaderSample(object):
     def __init__(self, u):
-
         self.protocol = u.unpack_uint()
         self.frame_len = u.unpack_uint()
 
         self.payload_removed = u.unpack_uint()
 
         self.sample_header = u.unpack_string()
+
+        self.samplers = {
+            1: ISO8023Header
+        }
+
+        if self.samplers.get(self.protocol):
+            self.frame = self.samplers[self.protocol](u)
 
 class EthernetSample(object):
     def __init__(self, u):
@@ -302,7 +366,7 @@ class FlowSample(object):
 
         self.record_count = u.unpack_uint()
         
-        self.flows = []
+        self.flows = {}
 
         self.decoders = {
             1: HeaderSample,
@@ -324,7 +388,7 @@ class FlowSample(object):
         }
 
         for i in range(self.record_count):
-            counter_format = u.unpack_uint()
-            counter_size = u.unpack_uint()
-            self.flows.append(self.decoders[counter_format](u))
-
+            flow_format = u.unpack_uint()
+            flow_length = u.unpack_uint()
+            flow_u = xdrlib.Unpacker(u.unpack_fopaque(flow_length))
+            self.flows[flow_format] = self.decoders[flow_format](flow_u)
