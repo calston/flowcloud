@@ -2,17 +2,26 @@ import struct, socket, binascii
 import time
 import xdrlib
 
+from construct import *
+
 
 def unpack_address(u):
     addrtype = u.unpack_uint()
 
     if self.addrtype == 1:
-        self.address = u.unpack_fstring(4)
+        self.address = u.unpack_fopaque(4)
 
     if self.addrtype == 2:
-        self.address = u.unpack_fstring(16)
+        self.address = u.unpack_fopaque(16)
     
     return self.address
+
+class IPv4Address(object):
+    def __init__(self, addr_int):
+        self.na = struct.pack('!L', addr_int)
+    
+    def __str__(self):
+        return socket.inet_ntoa(self.na)
 
 class Sflow(object):
     def __init__(self, payload, host):
@@ -176,43 +185,90 @@ class CounterSample(object):
             self.counters[counter_format] = self.decoders[counter_format](u)
 
 class ISO8023Header(object):
-    def __init__(self, u):
-        # Ethernet Frame
-        self.dst_mac = u.unpack_fstring(6)
-        self.src_mac = u.unpack_fstring(6)
-        self.typelen = u.unpack_uhyper()
+    def __init__(self, data):
+        frame = Struct("Frame", 
+            Bytes("destination", 6),
+            Bytes("source", 6),
+            Enum(UBInt16("type"),
+                IPv4=0x0800,
+                ARP=0x0806,
+                RARP=0x8035,
+                X25=0x0805,
+                IPX=0x8137,
+                IPv6=0x86DD,
+                VLAN=0x8100
+            )
+        )
 
+        ethernet = frame.parse(data[:14])
+        data = data[14:]
 
-        if self.typelen == 0x8100:
-            d = u.unpack_uhyper()
+        self.src_mac = ethernet.destination
+        self.dst_mac = ethernet.source
+
+        if ethernet.type == 'VLAN':
+            d = ord(data[0])
             self.vlan = d & 0x0fff
             self.vlan_priority = d >> 13
-        else:
-            self.vlan = None
         
-        if self.typelen == 0x0800:
-            b = ord(u.unpack_fopaque(1))
-            ver = b >> 4
+        if ethernet.type == 'IPv4':
+            self.decodeIPv4(data)
 
-            self.decodeIPv4(u)
+        #self.typelen = u.unpack_uhyper()
 
-        self.typelen = u.unpack_uhyper()
+    def decodeIPv4(self, data):
 
-    def decodeIPv4(self, u):
-        self.ip_dsf = ord(u.unpack_fopaque(1))
-        self.ip_length = u.unpack_uhyper()
-        self.ip_id = u.unpack_uhyper()
-        self.ip_flags = u.unpack_uhyper()
-        self.ip_ttl = ord(u.unpack_fopaque(1))
-        self.ip_proto = ord(u.unpack_fopaque(1))
-        self.ip_checksum = u.unpack_uhyper()
+        ip = Struct("ip_header", 
+            EmbeddedBitStruct(
+                Const(Nibble("version"), 4),
+                Nibble("header_length"),
+            ),
+            BitStruct("tos",
+                Bits("precedence", 3),
+                Flag("minimize_delay"),
+                Flag("high_throuput"),
+                Flag("high_reliability"),
+                Flag("minimize_cost"),
+                Padding(1),
+            ),
+            UBInt16("total_length"),
+            UBInt16("id"),
+            UBInt16("flags"),
+            UBInt8("ttl"),
+            Enum(UBInt8("proto"),
+                UDP=0x11,
+                TCP=0x06
+            ),
+            UBInt16("checksum"),
+            UBInt32("src"),
+            UBInt32("dst"),
+        )
 
-        self.ip_src = u.unpack_uint()
-        self.ip_dst = u.unpack_uint()
-        
-        # Try get some TCP info...
-        self.ip_sport = u.unpack_uhyper()
-        self.ip_dport = u.unpack_uhyper()
+
+        self.ip = ip.parse(data[:ip.sizeof()])
+
+        self.ip_src = IPv4Address(self.ip.src)
+        self.ip_dst = IPv4Address(self.ip.dst)
+
+        data = data[ip.sizeof():]
+
+        if self.ip.proto == 'TCP':
+            self.tcp = Struct("tcp",
+                UBInt16("sport"),
+                UBInt16("dport"),
+            ).parse(data)
+
+            self.ip_sport = self.tcp.sport
+            self.ip_dport = self.tcp.dport
+
+        if self.ip.proto == 'UDP':
+            self.udp = Struct("tcp",
+                UBInt16("sport"),
+                UBInt16("dport"),
+            ).parse(data)
+
+            self.ip_sport = self.udp.sport
+            self.ip_dport = self.udp.dport
 
 class IPv4Header(object):
     def __init__(self, u):
@@ -244,7 +300,9 @@ class HeaderSample(object):
         }
 
         if self.samplers.get(self.protocol):
-            self.frame = self.samplers[self.protocol](u)
+            self.frame = self.samplers[self.protocol](
+                self.sample_header
+            )
 
 class EthernetSample(object):
     def __init__(self, u):
@@ -389,6 +447,6 @@ class FlowSample(object):
 
         for i in range(self.record_count):
             flow_format = u.unpack_uint()
-            flow_length = u.unpack_uint()
-            flow_u = xdrlib.Unpacker(u.unpack_fopaque(flow_length))
+            flow_head = u.unpack_opaque()
+            flow_u = xdrlib.Unpacker(flow_head)
             self.flows[flow_format] = self.decoders[flow_format](flow_u)
