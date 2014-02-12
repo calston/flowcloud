@@ -3,6 +3,7 @@ import time
 import xdrlib
 
 from construct import *
+from construct import adapters
 
 
 def unpack_address(u):
@@ -200,19 +201,29 @@ class ISO8023Header(object):
             )
         )
 
-        ethernet = frame.parse(data[:14])
+        try:
+            ethernet = frame.parse(data[:14])
+        except adapters.MappingError:
+            print "Broken ethernet header"
+            self.frame = None
+            print repr(data)
+            return
         data = data[14:]
 
         self.src_mac = ethernet.destination
         self.dst_mac = ethernet.source
+
 
         if ethernet.type == 'VLAN':
             d = ord(data[0])
             self.vlan = d & 0x0fff
             self.vlan_priority = d >> 13
         
-        if ethernet.type == 'IPv4':
+        elif ethernet.type == 'IPv4':
             self.decodeIPv4(data)
+
+        else:
+            print ethernet.type, repr(data)
 
         #self.typelen = u.unpack_uhyper()
 

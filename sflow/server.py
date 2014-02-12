@@ -15,8 +15,6 @@ class DatagramReceiver(DatagramProtocol):
     def datagramReceived(self, data, (host, port)):
         sflow = protocol.Sflow(data, host)
 
-        print sflow.uptime
-
         for sample in sflow.samples:
             if isinstance(sample, protocol.FlowSample):
                 self.process_flow_sample(sflow, sample)
