@@ -11,7 +11,7 @@ from sflow import server
 
 class Options(usage.Options):
     optParameters = [
-        ["port", "p", 9998, "The port to listen on."],
+        ["port", "p", 6343, "The port to listen on."],
     ]
 
 class SflowServiceMaker(object):
