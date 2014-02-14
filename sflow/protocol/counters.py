@@ -23,7 +23,7 @@ class InterfaceCounters(object):
         self.if_outMcast = u.unpack_uint()
         self.if_outBcast = u.unpack_uint()
         self.if_outDiscard = u.unpack_uint()
-        self.if_inError = u.unpack_uint()
+        self.if_outError = u.unpack_uint()
  
         self.if_promisc = u.unpack_uint()
 
