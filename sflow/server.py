@@ -176,6 +176,7 @@ class DatagramReceiver(CacheMixin, DatagramProtocol):
                 if_cache['out']['octets'] = v.if_outOctets
                 if_cache['out']['packets'] = v.if_outPackets 
                 if_cache['out']['mcast'] = v.if_outMcast
+                
                 if_cache['out']['bcast'] = v.if_outBcast
                 if_cache['out']['discard'] = v.if_outDiscard 
                 if_cache['out']['errors'] = v.if_outError
